@@ -1,26 +1,21 @@
 import telebot
 import requests
-import threading
-from flask import Flask
+from flask import Flask, request
 import os
 
-# Aapke diye gaye credentials
+# Aapke Tokens
 TELEGRAM_BOT_TOKEN = "8688782666:AAEUmkF6sByDTNVm81RERY_WGXLNfSoLroA"
 GEMINI_API_KEY = "AIzaSyDgn9z1Z_BOPWGaY0Lt2tuYSCeG7iq1KRQ"
 
-# Aapka custom endpoint (Gemini 2.5 Flash)
-ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+# Aapke Screenshot se aapka Render URL
+RENDER_URL = "https://tg-vip-bot-man.onrender.com"
+
+# Maine model gemini-1.5-flash kar diya hai taaki koi API error na aaye
+ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-
-# Render ke liye Dummy Web Server (Taki app crash na ho)
 app = Flask(__name__)
 
-@app.route('/')
-def index():
-    return "Real Human Bot is Live on Render!"
-
-# Ye prompt bot ko ek asli insaan banayega
 SYSTEM_PROMPT = """
 Tumhara naam 'Aman' hai. Tum ek real human ho aur apne doston ke Telegram group me ho. 
 Tumhare andar feelings hain (gussa, khushi, pyaar). Tum ek AI ya bot bilkul nahi ho. Agar koi pooche toh bolna 'Bhai main insaan hu, free rehta hu isliye hamesha online hu'.
@@ -44,7 +39,7 @@ def ask_gemini(user_name, text):
         return data['candidates'][0]['content']['parts'][0]['text'].strip()
     except Exception as e:
         print("Gemini API Error:", e)
-        return "Bhai mera thoda net slow chal raha hai, baad me batata hu."
+        return "Bhai thoda busy hu, net slow chal raha hai mera."
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -56,31 +51,34 @@ def handle_messages(message):
     is_mentioned = f"@{bot_username}" in text
     is_private = message.chat.type == 'private'
     
-    # Jhagda ya gaali detect karne ke words
     bad_words = ['gali', 'kutta', 'chutiya', 'harami', 'pagal', 'marunga', 'ladai', 'fuck', 'hate']
     is_angry = any(word in text for word in bad_words)
 
-    # Bot tabhi reply karega jab:
-    # 1. Private chat ho
-    # 2. Koi bot ko mention kare ya reply kare
-    # 3. Group me koi GAALI de ya jhagda kare (Auto-intervene karega)
     if is_private or is_mentioned or is_reply_to_bot or is_angry:
-        
-        # Real lagne ke liye "typing..." status dikhana
         bot.send_chat_action(message.chat.id, 'typing')
-        
         reply = ask_gemini(user_name, message.text)
         bot.reply_to(message, reply)
 
-def run_telegram_bot():
-    print("Bot started polling...")
-    bot.polling(none_stop=True)
+# Webhook Route - Telegram is URL par messages bhejega
+@app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    return 'Forbidden', 403
+
+# Check karne ke liye ki server live hai ya nahi
+@app.route('/')
+def index():
+    return "Real Human Bot Server is Live!"
 
 if __name__ == "__main__":
-    # Threading use kar rahe hain taaki Telegram Bot aur Web Server dono ek sath chalein
-    bot_thread = threading.Thread(target=run_telegram_bot)
-    bot_thread.start()
+    # Purana polling hata kar naya webhook set kar rahe hain
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{RENDER_URL}/{TELEGRAM_BOT_TOKEN}")
     
-    # Render automatic PORT assign karta hai
+    # Port Render automatically assign karega
     port = int(os.environ.get('PORT', 10000))
     app.run(host="0.0.0.0", port=port)
